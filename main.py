@@ -55,14 +55,22 @@ def login():
         username = request.form.get('username')
         password = request.form.get('password')
     if username in users.keys():
-        if users[username].authenticate(password):
-            token = users[username].init_session()
-            resp = make_response(redirect('/index'))
-            resp.set_cookie('username', username)
-            resp.set_cookie('token', token)
-            return resp
+        if username == "drum":
+            if users[username].authenticate(password):
+                token = users[username].init_session()
+                resp = make_response(redirect('/drum'))
+                resp.set_cookie('username', username)
+                resp.set_cookie('token', token)
+                return resp
         else:
-            flash("Username or password is incorrect!!!")
+            if users[username].authenticate(password):
+                token = users[username].init_session()
+                resp = make_response(redirect('/index'))
+                resp.set_cookie('username', username)
+                resp.set_cookie('token', token)
+                return resp
+            else:
+                flash("Username or password is incorrect!!!")
     else:
         flash("User does not exists")
 
@@ -128,6 +136,12 @@ def change_pwd():
             flash("Password is incorrect!!!")
 
     return render_template('changepwd.html')
+
+@app.route('/drum', methods=['GET', 'POST'])
+@login_required
+def drum():
+    return render_template('drum.html')
+        
 
 if __name__ == '__main__':
     app.run(host='localhost', port = 5000, debug=True)
