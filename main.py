@@ -1,67 +1,133 @@
-from flask import Flask, render_template, redirect, request, make_response
+from flask import Flask, render_template, redirect, request, make_response, flash
 from functools import wraps
+import app_config
+from model.user import User
+import os
 
 app = Flask(__name__)
+app.config['SECRET_KEY'] = app_config.SECRET_KEY
 
-auth_token = ["asdqwezxc","123456789"]
+# users = {} 
+# users['admin'] = User('admin', 'admin')
 
-def generate_token(user,pwd):
-    if (user == 'admin' and pwd == 'admin'):
-        return auth_token[0]
-    elif (user == 'drum' and pwd == '123456'):
-        return auth_token[1]
+users = {name[:-5]:User.from_file(name) for name in os.listdir(app_config.USER_DB_DIR)}
+
+def login_required(func):
+    @wraps(func)
+    def login_func(*arg, **kwargs):
+        try:
+            if (users[request.cookies.get('username')].authorize(request.cookies.get('token'))):
+                return func(*arg, **kwargs)
+        except:
+            pass
+        flash ("Login required!!!")
+        return redirect('/login')
+
+    return login_func
+
+def no_login(func):
+    @wraps(func)
+    def no_login_func(*arg, **kwargs):
+        if request.cookies.get('username') in users.keys():
+            if users[request.cookies.get('username')].authorize(request.cookies.get('token')):
+                flash("You're already in!!!")
+                return redirect('/index')
+        
+        return func(*arg, **kwargs)
+
+    return no_login_func
 
 @app.route('/')
 def home():
     return redirect('/login')
 
-def auth(request):
-    global auth_token
-    key = []
-    token1 = request.cookies.get('login-info1')
-    token2 = request.cookies.get('login-info2')
-    if token1==auth_token[0]:
-        key.append(1)
-    if token2==auth_token[1]:
-        key.append(2)
-    return key
+@app.route('/index')
+@login_required
+def index():
+    return render_template('index.html')
 
 @app.route('/login', methods=['GET', 'POST'])
+@no_login
 def login():
-
     if request.method == 'GET':
         return render_template('login.html')
     else:
-        user = request.form.get('user')
-        pwd = request.form.get('password')
-        if (user == 'admin' and pwd == 'admin'):
-            token1 = generate_token(user, pwd)
-            resp1 = make_response(redirect('/index'))
-            resp1.set_cookie('login-info1', token1)
-            return resp1
-        elif (user == 'drum' and pwd == '123456'):
-            token2 = generate_token(user, pwd)
-            resp2 = make_response(redirect('/drum'))
-            resp2.set_cookie('login-info2', token2)
-            return resp2
+        username = request.form.get('username')
+        password = request.form.get('password')
+    if username in users.keys():
+        if users[username].authenticate(password):
+            token = users[username].init_session()
+            resp = make_response(redirect('/index'))
+            resp.set_cookie('username', username)
+            resp.set_cookie('token', token)
+            return resp
         else:
-            return redirect('/login'), 403
-
-@app.route('/index')
-def index():
-    if 1 in auth(request):
-        return render_template('index.html')
+            flash("Username or password is incorrect!!!")
     else:
-        return redirect('/')
+        flash("User does not exists")
 
-@app.route('/drum')
-# @auth_required
-def drum():
-    if 2 in auth(request):
-        return render_template('drum.html')
+    return render_template('login.html')
+
+@app.route('/logout', methods=['POST'])
+@login_required
+def logout():
+    username = request.cookies.get('username')
+    users[username].terminate_session()
+    resp = make_response(redirect('/login'))
+    resp.delete_cookie('username')
+    resp.delete_cookie('token')
+    flash("You've logged out!!!")
+    return resp
+
+@app.route('/register', methods=['POST', 'GET'])
+@no_login
+def register():
+    if request.method == "GET":
+        return render_template('register.html')
+    
+    username = request.form.get('username')
+    password = request.form.get('password')
+    password_confirm = request.form.get('password_confirm')
+
+    if username not in users.keys():
+        if password == password_confirm:
+            users[username] = User.new(username, password)
+            token = users[username].init_session()
+            resp = make_response(redirect('/index'))
+            resp.set_cookie('username', username)
+            resp.set_cookie('token', token)
+            return resp
+        else:
+            flash("Passwords do not match!!!")
     else:
-        return redirect('/')
+        flash("User already exists!!!")
 
+    return render_template('register.html')
+
+@app.route('/changepwd', methods=['GET', 'POST'])
+@login_required
+def change_pwd():
+    if request.method == 'GET':
+        return render_template('changepwd.html')
+    else:
+        username = request.cookies.get('username')
+        password = request.form.get('cur_password')
+        new_password = request.form.get('new_password')
+        password_confirm = request.form.get('password_confirm')
+
+        if users[username].authenticate(password):
+            if new_password == password_confirm:
+                users[username] = User.new(username,new_password)
+                users[username].dump()
+                resp = make_response(redirect('/login'))
+                flash("You have to login again!!!")
+                return resp
+            else:
+                flash("Password do not match!!!")
+        else:
+            flash("Password is incorrect!!!")
+
+    return render_template('changepwd.html')
 
 if __name__ == '__main__':
     app.run(host='localhost', port = 5000, debug=True)
